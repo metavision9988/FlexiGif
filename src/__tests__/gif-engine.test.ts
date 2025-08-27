@@ -7,6 +7,7 @@ import { GifSettings, EstimateResult } from '@/types';
 // Mock FFmpeg
 const mockFFmpeg = {
   loaded: false,
+  on: jest.fn(),
   load: jest.fn().mockResolvedValue(undefined),
   writeFile: jest.fn().mockResolvedValue(undefined),
   exec: jest.fn().mockResolvedValue(undefined),

@@ -22,6 +22,11 @@ export class GifEngine implements ConversionEngine {
   
   async convert(file: File, settings: GifSettings): Promise<Blob> {
     await this.initialize();
+
+    this.ffmpeg.on('log', ({ message }) => {
+      console.log('[FFMPEG-GIF]:', message);
+    });
+
     const inputName = `input.${file.name.split('.').pop() || 'mp4'}`;
     await this.ffmpeg.writeFile(inputName, await fetchFile(file));
 

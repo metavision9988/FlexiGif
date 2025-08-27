@@ -21,6 +21,10 @@ export class WebMEngine implements ConversionEngine {
   
   async convert(file: File, settings: WebMSettings): Promise<Blob> {
     await this.initialize();
+
+    this.ffmpeg.on('log', ({ message }) => {
+      console.log('[FFMPEG-WEBM]:', message);
+    });
     
     const inputName = `input.${file.name.split('.').pop()}`;
     await this.ffmpeg.writeFile(inputName, await fetchFile(file));
