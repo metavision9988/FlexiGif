@@ -22,55 +22,66 @@ export class GifEngine implements ConversionEngine {
   
   async convert(file: File, settings: GifSettings): Promise<Blob> {
     await this.initialize();
-    
-    // Prepare input file
-    const inputName = `input.${file.name.split('.').pop()}`;
+    const inputName = `input.${file.name.split('.').pop() || 'mp4'}`;
     await this.ffmpeg.writeFile(inputName, await fetchFile(file));
-    
-    // Build conversion command
-    const command = this.buildCommand(inputName, 'output.gif', settings);
-    
-    // Execute conversion
-    await this.ffmpeg.exec(command);
-    
-    // Read result
-    const gifData = await this.ffmpeg.readFile('output.gif');
-    
-    // Cleanup
-    await this.ffmpeg.deleteFile(inputName);
-    await this.ffmpeg.deleteFile('output.gif');
-    
-    return new Blob([new Uint8Array(gifData as Uint8Array)], { type: 'image/gif' });
-  }
-  
-  buildCommand(input: string, output: string, settings: GifSettings): string[] {
-    const cmd = ['-i', input];
-    
-    // FPS setting
-    let videoFilter = `fps=${settings.fps}`;
-    
-    // Resolution setting
-    if (settings.width && settings.height) {
-      videoFilter = `fps=${settings.fps},scale=${settings.width}:${settings.height}:flags=lanczos`;
-    }
-    
-    cmd.push('-vf', videoFilter);
-    
-    // Quality settings (color palette)
-    const colors = {
-      low: '128',
-      medium: '256',
-      high: '256'
-    };
-    
+
     if (settings.optimize) {
-      // 2-pass optimization for better quality
-      videoFilter = `${videoFilter},palettegen`;
-      cmd[cmd.indexOf('-vf') + 1] = videoFilter;
+      // --- 2-Pass Conversion for Higher Quality ---
+      const paletteName = 'palette.png';
+
+      // 1. First Pass: Generate color palette
+      const filters: string[] = [];
+      filters.push(`fps=${settings.fps}`);
+      if (settings.width && settings.height) {
+        filters.push(`scale=${settings.width}:${settings.height}:flags=lanczos`);
+      }
+
+      const paletteGenCommand = [
+        '-i', inputName,
+        '-vf', `${filters.join(',')},palettegen`,
+        paletteName
+      ];
+      await this.ffmpeg.exec(paletteGenCommand);
+
+      // 2. Second Pass: Use palette to create GIF
+      const gifCommand = [
+        '-i', inputName,
+        '-i', paletteName,
+        '-filter_complex', `[0:v]${filters.join(',')}[v];[v][1:v]paletteuse`,
+        'output.gif'
+      ];
+      await this.ffmpeg.exec(gifCommand);
+
+      // 3. Cleanup
+      const gifData = await this.ffmpeg.readFile('output.gif');
+      await this.ffmpeg.deleteFile(inputName);
+      await this.ffmpeg.deleteFile(paletteName);
+      await this.ffmpeg.deleteFile('output.gif');
+
+      return new Blob([new Uint8Array(gifData as Uint8Array)], { type: 'image/gif' });
+
+    } else {
+      // --- 1-Pass Conversion for Speed ---
+      const filters: string[] = [];
+      filters.push(`fps=${settings.fps}`);
+      if (settings.width && settings.height) {
+        filters.push(`scale=${settings.width}:${settings.height}:flags=lanczos`);
+      }
+
+      const command = ['-i', inputName];
+      if (filters.length > 0) {
+        command.push('-vf', filters.join(','));
+      }
+      command.push('output.gif');
+
+      await this.ffmpeg.exec(command);
+
+      const gifData = await this.ffmpeg.readFile('output.gif');
+      await this.ffmpeg.deleteFile(inputName);
+      await this.ffmpeg.deleteFile('output.gif');
+
+      return new Blob([new Uint8Array(gifData as Uint8Array)], { type: 'image/gif' });
     }
-    
-    cmd.push(output);
-    return cmd;
   }
   
   async estimate(file: File, settings: GifSettings): Promise<EstimateResult> {
