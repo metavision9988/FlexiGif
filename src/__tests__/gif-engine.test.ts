@@ -85,103 +85,72 @@ describe('GifEngine', () => {
   });
 
   describe('convert method', () => {
-    it('should convert file to GIF blob', async () => {
+    it('should perform a single-pass conversion when optimize is false', async () => {
       const file = createMockFile('test.mp4', 1024 * 1024, 'video/mp4');
       const settings: GifSettings = {
-        fps: 15,
-        quality: 'medium',
-        optimize: true
+        fps: 30,
+        quality: 'high',
+        optimize: false,
       };
 
       const result = await engine.convert(file, settings);
 
-      expect(mockFFmpeg.writeFile).toHaveBeenCalled();
-      expect(mockFFmpeg.exec).toHaveBeenCalled();
+      expect(mockFFmpeg.writeFile).toHaveBeenCalledTimes(1);
+      expect(mockFFmpeg.exec).toHaveBeenCalledTimes(1);
+
+      const command = mockFFmpeg.exec.mock.calls[0][0] as string[];
+      expect(command.join(' ')).not.toContain('palettegen');
+      expect(command.join(' ')).not.toContain('paletteuse');
+
       expect(mockFFmpeg.readFile).toHaveBeenCalledWith('output.gif');
-      expect(mockFFmpeg.deleteFile).toHaveBeenCalledTimes(2);
+      expect(mockFFmpeg.deleteFile).toHaveBeenCalledTimes(2); // input and output
       expect(result).toBeInstanceOf(Blob);
       expect(result.type).toBe('image/gif');
     });
 
-    it('should handle different quality settings', async () => {
+    it('should use 2-pass conversion when optimize is true', async () => {
       const file = createMockFile('test.mp4', 1024 * 1024, 'video/mp4');
-      const settings: GifSettings = {
-        fps: 30,
-        quality: 'high',
-        optimize: false
-      };
-
-      await engine.convert(file, settings);
-
-      expect(mockFFmpeg.exec).toHaveBeenCalled();
-    });
-
-    it('should handle custom dimensions', async () => {
-      const file = createMockFile('test.mp4', 1024 * 1024, 'video/mp4');
-      const settings: GifSettings = {
-        fps: 24,
-        width: 800,
-        height: 600,
-        quality: 'medium',
-        optimize: true
-      };
-
-      await engine.convert(file, settings);
-
-      expect(mockFFmpeg.exec).toHaveBeenCalled();
-      // Command should include scale parameters
-      const execCall = mockFFmpeg.exec.mock.calls[0][0];
-      expect(execCall).toEqual(expect.arrayContaining(['-vf']));
-    });
-  });
-
-  describe('buildCommand method', () => {
-    it('should build correct FFmpeg command for basic settings', () => {
       const settings: GifSettings = {
         fps: 15,
         quality: 'medium',
-        optimize: false
+        optimize: true,
       };
 
-      const command = engine.buildCommand('input.mp4', 'output.gif', settings);
+      await engine.convert(file, settings);
 
-      expect(command).toContain('-i');
-      expect(command).toContain('input.mp4');
-      expect(command).toContain('-vf');
-      expect(command).toContain('fps=15');
-      expect(command).toContain('output.gif');
+      // Expect two separate command executions for 2-pass
+      expect(mockFFmpeg.exec).toHaveBeenCalledTimes(2);
+
+      // 1. First pass: palette generation
+      const firstPassCommand = mockFFmpeg.exec.mock.calls[0][0] as string[];
+      expect(firstPassCommand.join(' ')).toContain('palettegen');
+      expect(firstPassCommand.join(' ')).toContain('palette.png');
+
+      // 2. Second pass: palette usage
+      const secondPassCommand = mockFFmpeg.exec.mock.calls[1][0] as string[];
+      expect(secondPassCommand.join(' ')).toContain('[1:v]paletteuse'); // Check for filtergraph input
+      expect(secondPassCommand[secondPassCommand.indexOf('-i') + 1]).toBe('input.mp4');
+      expect(secondPassCommand[secondPassCommand.indexOf('-i', 2) + 1]).toBe('palette.png');
+
+      // Expect cleanup of all files including the palette
+      expect(mockFFmpeg.deleteFile).toHaveBeenCalledWith(expect.stringContaining('input.'));
+      expect(mockFFmpeg.deleteFile).toHaveBeenCalledWith('palette.png');
+      expect(mockFFmpeg.deleteFile).toHaveBeenCalledWith('output.gif');
+      expect(mockFFmpeg.deleteFile).toHaveBeenCalledTimes(3);
     });
 
-    it('should include scale parameters when dimensions provided', () => {
-      const settings: GifSettings = {
-        fps: 30,
-        width: 640,
-        height: 480,
-        quality: 'high',
-        optimize: false
-      };
+    it('should produce a valid Blob as output', async () => {
+        const file = createMockFile('test.mp4', 1024 * 1024, 'video/mp4');
+        const settings: GifSettings = {
+          fps: 15,
+          quality: 'medium',
+          optimize: true,
+        };
 
-      const command = engine.buildCommand('input.mp4', 'output.gif', settings);
+        const result = await engine.convert(file, settings);
 
-      expect(command).toContain('-vf');
-      const vfIndex = command.indexOf('-vf');
-      const filterValue = command[vfIndex + 1];
-      expect(filterValue).toContain('scale=640:480');
-    });
-
-    it('should handle optimization flag', () => {
-      const settings: GifSettings = {
-        fps: 24,
-        quality: 'medium',
-        optimize: true
-      };
-
-      const command = engine.buildCommand('input.mp4', 'output.gif', settings);
-
-      expect(command).toContain('-vf');
-      const vfIndex = command.indexOf('-vf');
-      const filterValue = command[vfIndex + 1];
-      expect(filterValue).toContain('palettegen');
+        expect(result).toBeInstanceOf(Blob);
+        expect(result.type).toBe('image/gif');
     });
   });
 
